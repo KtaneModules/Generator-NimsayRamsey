@@ -8,6 +8,10 @@ using KModkit;
 
 public class GeneratorScript : MonoBehaviour {
 
+	/*
+		TP is fixed, however, I would like the dual solve function to only trigger when 2 or more VALID modules are solved. This means I will need to check each new solved module every solve
+	*/
+
 	public KMBombInfo Bomb;
 	public KMAudio Audio;
 	public KMBombModule Module;
@@ -33,7 +37,7 @@ public class GeneratorScript : MonoBehaviour {
 	private bool submitLAG = false;
 	private int lagFrames = 0;
 
-	private List<string> IGNORELIST = new List<string> {"The Generator"};
+	private List<string> IGNORELIST = new List<string> {"The Generator", "Zxample Module 1"};
 	private int stageLength;
 	private List<bool[]> SolveStages = new List<bool[]> {};
 	private int currentStage = 0;
@@ -58,6 +62,7 @@ public class GeneratorScript : MonoBehaviour {
 
 	//Prime letters are B/2, C/3, E/5, G/7, K/11, M/13, Q/17, S/19, W/23
 
+	private bool dualSolve = false; //Failsafe in case 2 or more mods are solved on the same frame
 	
 	//-----------------------------------------------------//
 
@@ -80,11 +85,12 @@ public class GeneratorScript : MonoBehaviour {
 	void Start() {
 		Debug.LogFormat("[The Generator #{0}] Generator Initialized. Stages shown as TL-ML-BL // TR-MR-BR", moduleId);
 		InitSolution();
+		StartCoroutine(UpdateSolves());
 		statusLights[2].material = LightColors[3];
 	}
 
 	void InitSolution() {
-		foreach (string ignored in BossInfo.GetIgnoredModules("42")){
+		foreach (string ignored in BossInfo.GetIgnoredModules("The Generator")){
 			IGNORELIST.Add(ignored);
 		}
 		foreach (string module in Bomb.GetSolvableModuleNames()){
@@ -94,7 +100,7 @@ public class GeneratorScript : MonoBehaviour {
 		}
 		//Debug.Log(stageLength);
 		//Debug.Log(stageLength / 2);
-		if (stageLength > 4){ stageLength = UnityEngine.Random.Range((stageLength / 2) + (stageLength % 2), stageLength+1); }
+		if (stageLength > 4 && !moduleDebug) { stageLength = UnityEngine.Random.Range((stageLength / 2) + (stageLength % 2), stageLength+1); }
 		Debug.LogFormat("[The Generator #{0}] Number of stages: {1}", moduleId, stageLength-1);
 
 		NewShuffleSet(false);
@@ -139,19 +145,21 @@ public class GeneratorScript : MonoBehaviour {
 		}
 	}
 
-	void Update() {
-		if (SOLVES != Bomb.GetSolvedModuleNames().Count()) {
-            GrabTrippedName();
-			if(!IGNORELIST.Contains(MostRecent)){
-				solveCount = Bomb.GetSolvedModuleNames().Count();
-				if (currentStage != solveCount && currentStage != stageLength){
-					currentStage += 1;
-					if (currentStage != stageLength){
-						renderDisplay(false);
-						NewShuffleSet(true);
-						StageToLog(1);
-						Debug.LogFormat("[The Generator #{0}] Submit Set: {1}-{2}-{3} // {4}-{5}-{6}", moduleId, logSET[0], logSET[1], logSET[2], logSET[3], logSET[4], logSET[5]);
-					} else {
+	IEnumerator UpdateSolves() {
+		while (!TPAutoActive) {
+			if (SOLVES != Bomb.GetSolvedModuleNames().Count() && currentStage != stageLength) {
+				yield return new WaitForSeconds(0.1f);
+				dualSolve = false;
+				//Debug.Log(solveCount);
+				GrabTrippedName();
+				if (dualSolve) {// && currentStage != solveCount && currentStage != stageLength
+					Debug.LogFormat("[The Generator #{0}] Multiple modules solved on the same frame. Reducing the stage count by {1} max", moduleId, Bomb.GetSolvedModuleNames().Count() - solveCount);
+					stageLength -= Bomb.GetSolvedModuleNames().Count() - solveCount;
+					solveCount = Bomb.GetSolvedModuleNames().Count();
+					if (currentStage >= stageLength) {
+						currentStage++;
+						stageLength = currentStage;
+						//currentStage++;
 						Debug.LogFormat("[The Generator #{0}] Stage number reached. Awating power sequence...", moduleId);
 						buttonONS = new bool[] {false, false, false, false, false, false};
 						SegmentDisplay.text = "READY";
@@ -164,13 +172,38 @@ public class GeneratorScript : MonoBehaviour {
 						statusLights[1].material = LightColors[5];
 						TPAutoActive = true;
 					}
-				} /*else if (currentStage == stageLength && !moduleSolved){
-					Debug.LogFormat("[The Generator #{0}] <<POWER SURGE>> extra module solved before generator was powered. Striking...", moduleId);
-					GetComponent<KMBombModule>().HandleStrike();
-				}*/ //Maybe add a small visual flair when you solve additional modules so the log can still say power surge
-			}
+				} else if (!IGNORELIST.Contains(MostRecent)){
+					solveCount = Bomb.GetSolvedModuleNames().Count();
+					if (currentStage != solveCount && currentStage != stageLength){
+						currentStage += 1;
+						if (currentStage != stageLength){
+							renderDisplay(false);
+							NewShuffleSet(true);
+							StageToLog(1);
+							Debug.LogFormat("[The Generator #{0}] Submit Set: {1}-{2}-{3} // {4}-{5}-{6}", moduleId, logSET[0], logSET[1], logSET[2], logSET[3], logSET[4], logSET[5]);
+						} else {
+							Debug.LogFormat("[The Generator #{0}] Stage number reached. Awating power sequence...", moduleId);
+							buttonONS = new bool[] {false, false, false, false, false, false};
+							SegmentDisplay.text = "READY";
+							Audio.PlaySoundAtTransform("metal_close_01", transform);
+							Audio.PlaySoundAtTransform("lock_open_01", transform);
+							for(int i = 0; i < 6; i++){
+								ButtonLights[i].material = LightColors[0];
+							}
+							statusLights[2].material = LightColors[2];
+							statusLights[1].material = LightColors[5];
+							TPAutoActive = true;
+						}
+					} /*else if (currentStage == stageLength && !moduleSolved){
+						Debug.LogFormat("[The Generator #{0}] <<POWER SURGE>> extra module solved before generator was powered. Striking...", moduleId);
+						GetComponent<KMBombModule>().HandleStrike();
+					}*/ //Maybe add a small visual flair when you solve additional modules so the log can still say power surge
+				}
+			} else { yield return new WaitForSeconds(0.01f); }
 		}
+	}
 
+	void Update() {
 		if (submitBOOL != submitLAG){
 			if (lagFrames != 10){
 				if (lagFrames < 6){
@@ -192,15 +225,64 @@ public class GeneratorScript : MonoBehaviour {
 		
 	}
 
+	void GrabTrippedName () { //Borrowed from Validation
+		Debug.Log(Bomb.GetSolvedModuleNames().Count() + " // " + SOLVES);
+		//List<string> tempSolved = Bomb.GetSolvedModuleNames();
+		Debug.Log(Bomb.GetSolvedModuleNames().Count() + " // " + SOLVES);
+		if (Bomb.GetSolvedModuleNames().Count() - SOLVES >= 2) {
+			dualSolve = true;
+			primeOVERIDE = false;
+			for(int i = SOLVES; i < Bomb.GetSolvedModuleNames().Count(); i++) { SolveList.Add(Bomb.GetSolvedModuleNames()[i]); }
+			SOLVES = Bomb.GetSolvedModuleNames().Count();
+			return;
+		}
+		//Debug.Log("I'm here");
+		MostRecent = GetLatestSolve(Bomb.GetSolvedModuleNames(), SolveList);
+        SolveList.Add(MostRecent);
+        MostRecent = SolveList[SOLVES];
+		Debug.Log(MostRecent);
+		SOLVES = Bomb.GetSolvedModuleNames().Count();
+		
+		var module = MostRecent;
+   	    if (module.StartsWith("The ")) {
+  	    	module = module.Substring(4);
+        }
+		if (!Regex.IsMatch(module.Substring(0, 1), "[a-zA-Z0-9]")){
+			primeOVERIDE = true;
+			return;
+		} else {primeOVERIDE = false;}
+		string primeLetter = module.Substring(0, 1).ToUpper();
+		//Debug.Log(primeLetter);
+		if(Regex.IsMatch(primeLetter, "[0-9]")){
+			primeNumber = Int32.Parse(primeLetter);
+		} else {
+			primeNumber = Array.IndexOf(alphabet, primeLetter)+1;
+			
+		}
+	}
+
+	//Borrowed from Validation
+	private string GetLatestSolve(List<string> a, List<string> b) {
+        string z = "";
+        for (int i = 0; i < b.Count; i++)
+        {
+            a.Remove(b.ElementAt(i));
+        }
+
+        z = a.ElementAt(0);
+        return z;
+    }
+	//END*/
+
 	void renderDisplay (bool mode){
 		string A = "";
 		string B = "";
 		int C = 0;
 		if (!mode){
 			A = "--";
-			if (solveCount < 10){
+			if (currentStage < 10){
 				if(Bomb.GetSolvableModuleNames().Count() < 10){ B = "--"; } else if (Bomb.GetSolvableModuleNames().Count() < 100) { B = "-0"; } else { B = "00"; }
-			} else if (solveCount < 100){
+			} else if (currentStage < 100){
 				if (Bomb.GetSolvableModuleNames().Count() < 100) { B = "-"; } else { B = "0"; }
 			} else {
 				B = "--";
@@ -217,7 +299,7 @@ public class GeneratorScript : MonoBehaviour {
 			}
 			C = submitStage;
 		}
-		if (moduleDebug) { SegmentDisplay.text = "WUMBO"; return; }
+		//if (moduleDebug) { SegmentDisplay.text = "WUMBO"; return; }
 		SegmentDisplay.text = A + B + C;
 	}
 
@@ -246,7 +328,7 @@ public class GeneratorScript : MonoBehaviour {
 				ledCount += 1;
 			}
 		}
-		if (moduleDebug) { currentSet = new bool[] {true, true, false, true, true, false}; }
+		//if (moduleDebug) { currentSet = new bool[] {true, true, false, true, true, false}; }
 		RenderButtonSets();
 		if (LOG){
 			StageToLog(0);
@@ -333,44 +415,6 @@ public class GeneratorScript : MonoBehaviour {
 			ButtonLights[i].material = LightColors[light];
 		}
 	}
-
-	void GrabTrippedName () { //Borrowed from Validation
-		//Debug.Log(Bomb.GetSolvedModuleNames().Count() + " // " + SolveList.Count());
-		MostRecent = GetLatestSolve(Bomb.GetSolvedModuleNames(), SolveList);
-        SolveList.Add(MostRecent);
-        MostRecent = SolveList[SOLVES];
-		SOLVES = Bomb.GetSolvedModuleNames().Count();
-		
-		var module = MostRecent;
-   	    if (module.StartsWith("The ")) {
-  	    	module = module.Substring(4);
-        }
-		if (!Regex.IsMatch(module.Substring(0, 1), "[a-zA-Z0-9]")){
-			primeOVERIDE = true;
-			return;
-		} else {primeOVERIDE = false;}
-		string primeLetter = module.Substring(0, 1).ToUpper();
-		//Debug.Log(primeLetter);
-		if(Regex.IsMatch(primeLetter, "[0-9]")){
-			primeNumber = Int32.Parse(primeLetter);
-		} else {
-			primeNumber = Array.IndexOf(alphabet, primeLetter)+1;
-			
-		}
-	}
-
-	//Borrowed from Validation
-	private string GetLatestSolve(List<string> a, List<string> b) {
-        string z = "";
-        for (int i = 0; i < b.Count; i++)
-        {
-            a.Remove(b.ElementAt(i));
-        }
-
-        z = a.ElementAt(0);
-        return z;
-    }
-	//END*/
 
 	void SubmitTest(){
 		if(moduleSolved) {return;}
@@ -484,13 +528,14 @@ public class GeneratorScript : MonoBehaviour {
 
 	IEnumerator TwitchHandleForcedSolve() //Autosolver
 	{
+		Debug.Log("Autosolver Engaged");
 		while (!TPAutoActive) yield return true;
 		yield return null;
 		Debug.Log("Autosolver started");
 		for (int stage = 0; stage < stageLength; stage++){
-			Debug.Log("Stage " + stage);
+			//Debug.Log("Stage " + stage);
 			for (int i = 0; i < 6; i++){
-				Debug.Log(i);
+				//Debug.Log(i);
 				if(buttonONS[i] != SolveStages[submitStage][i]){ ButtonList[i].OnInteract(); }
 				yield return new WaitForSeconds(0.1f);
 			}
